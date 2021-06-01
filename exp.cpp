@@ -1,6 +1,5 @@
 // nvc++ -acc -DEIGEN_DONT_VECTORIZE=1 -I./eigen exp.cpp -o exp
 
-#include <cmath>
 #include <iostream>
 #include <random>
 
@@ -12,14 +11,14 @@ using namespace std;
 using T = double;
 
 
-// Crout uses unit diagonals for the upper triangle
+#pragma acc routine seq
 template<typename T_>
 void Crout(int d,T_*S,T_*D){
    for(int k=0;k<d;++k){
       for(int i=k;i<d;++i){
          T_ sum=0.;
          for(int p=0;p<k;++p)sum+=D[i*d+p]*D[p*d+k];
-         D[i*d+k]=S[i*d+k]-sum; // not dividing by diagonals
+         D[i*d+k]=S[i*d+k]-sum;
       }
       for(int j=k+1;j<d;++j){
          T_ sum=0.;
@@ -28,6 +27,7 @@ void Crout(int d,T_*S,T_*D){
       }
    }
 }
+#pragma acc routine seq
 template<typename T_>
 void solveCrout(int d,T_*LU,T_*b,T_*x){
    T_ y[d];
@@ -39,7 +39,7 @@ void solveCrout(int d,T_*LU,T_*b,T_*x){
    for(int i=d-1;i>=0;--i){
       T_ sum=0.;
       for(int k=i+1;k<d;++k)sum+=LU[i*d+k]*x[k];
-      x[i]=(y[i]-sum); // not dividing by diagonals
+      x[i]=(y[i]-sum);
    }
 }
 
@@ -66,12 +66,15 @@ int main(int argc, char** argv) {
     cout << "b" << endl;
     cout << b.transpose() << endl << endl;
 
+    
+    // Eigen
     Matrix<T, Dynamic, 1> eigen_solution(size);
     eigen_solution = A.partialPivLu().solve(b);
     cout << "eigen solution CPU" << endl;
     cout << eigen_solution.transpose() << endl << endl;
 
 
+    // Croot Decomposition CPU
     Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU(size, size);
     Matrix<T, Dynamic, 1> croot_solution(size);  
 
@@ -80,6 +83,25 @@ int main(int argc, char** argv) {
 
     cout << "croot solution CPU" << endl;
     cout << croot_solution.transpose() << endl << endl;
+
+
+    // Croot Decomposition GPU
+    Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU_gpu(size, size);
+    Matrix<T, Dynamic, 1> croot_solution_gpu(size);
+
+    T *A_dev  = A.data();
+    T *LU_dev = LU_gpu.data();
+    T *b_dev  = b.data();
+    T *x_dev  = croot_solution_gpu.data();
+
+    #pragma acc kernels copyin(A_dev[0:size*size], LU_dev[0:size*size], b_dev[0:size]) copyout(x_dev[0:size])
+    {
+       Crout<T>(size, A_dev, LU_dev);
+       solveCrout<T>(size, LU_dev, b_dev, x_dev);
+    }
+    cout << "croot solution GPU" << endl;
+    cout << croot_solution_gpu.transpose() << endl << endl;
+
 
     return 0;
 }
