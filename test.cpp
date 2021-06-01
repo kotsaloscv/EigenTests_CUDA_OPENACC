@@ -20,6 +20,7 @@ using namespace std;
  * \param S Source matrix (C-style arrays : row-major order)
  * \param D Destination matrix (LU decomposition of S-matrix) (C-style arrays : row-major order)
  */
+#pragma acc routine seq
 template<typename T>
 void Crout(int d,T*S,T*D){
    for(int k=0;k<d;++k){
@@ -47,6 +48,7 @@ void Crout(int d,T*S,T*D){
  * \param b rhs vector
  * \param x solution of (LU)x=b linear system
  */
+#pragma acc routine seq
 template<typename T>
 void solveCrout(int d,T*LU,T*b,T*x){
    T y[d];
@@ -86,9 +88,9 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
     
     std::chrono::duration<double> eigen_solve_RowMajor(std::chrono::duration<double>::zero());
     std::chrono::duration<double> eigen_solve_ColMajor(std::chrono::duration<double>::zero());
-    std::chrono::duration<double> crout_solve(std::chrono::duration<double>::zero());
+    std::chrono::duration<double> crout_solve_host(std::chrono::duration<double>::zero());
 
-    for (int mat_size = 1; mat_size < 50; mat_size++)
+    for (int mat_size = 2; mat_size < 10; mat_size++)
     {
         Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> A_RowMajor(mat_size, mat_size);
         Matrix<T, Dynamic, Dynamic, Eigen::ColMajor> A_ColMajor(mat_size, mat_size); // default in Eigen!
@@ -124,27 +126,45 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
                 return false;
             }
 
-            // Crout Decomposition
+            // Crout Decomposition CPU
             Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU(mat_size, mat_size);
-            Matrix<T, Dynamic, 1> crout_solution(mat_size);
+            Matrix<T, Dynamic, 1> crout_solution_host(mat_size);
             
             t1 = std::chrono::high_resolution_clock::now();
             Crout<T>(mat_size, A_RowMajor.data(), LU.data());
-            solveCrout<T>(mat_size, LU.data(), b.data(), crout_solution.data());
+            solveCrout<T>(mat_size, LU.data(), b.data(), crout_solution_host.data());
             t2 = std::chrono::high_resolution_clock::now();
-            crout_solve += (t2 - t1);
+            crout_solve_host += (t2 - t1);
 
-            if (!allclose(eigen_solution_RowMajor, crout_solution, rtol, atol)) {
-                //cout << eigen_solution.transpose() << endl;
-                //cout << crout_solution.transpose() << endl << endl;
+            if (!allclose(eigen_solution_RowMajor, crout_solution_host, rtol, atol)) {
                 return false;
             }
+
+#ifdef GPU
+            // Crout Decomposition GPU
+            Matrix<T, Dynamic, 1> crout_solution_dev(size);
+
+            T *A_dev  = A_RowMajor.data();
+            T *LU_dev = LU.data();
+            T *b_dev  = b.data();
+            T *x_dev  = crout_solution_dev.data();
+
+            #pragma acc kernels copyin(A_dev[0:mat_size*mat_size], LU_dev[0:mat_size*mat_size], b_dev[0:mat_size]) copyout(x_dev[0:mat_size])
+            {
+                Crout<T>(mat_size, A_dev, LU_dev);
+                solveCrout<T>(mat_size, LU_dev, b_dev, x_dev);
+            }
+
+            if (!allclose(eigen_solution_RowMajor, crout_solution_dev, rtol, atol)) {
+                return false;
+            }
+#endif
         }
     }
 
     cout << "Eigen RowMajor : " << eigen_solve_RowMajor.count() << " s" << endl;
     cout << "Eigen ColMajor : " << eigen_solve_ColMajor.count() << " s" << endl;
-    cout << "Crout          : " << crout_solve.count() << " s" << endl;
+    cout << "Crout host     : " << crout_solve_host.count() << " s" << endl;
 
     return true;
 }
