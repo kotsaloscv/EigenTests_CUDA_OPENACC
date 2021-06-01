@@ -20,7 +20,6 @@ using namespace std;
  * \param S Source matrix (C-style arrays : row-major order)
  * \param D Destination matrix (LU decomposition of S-matrix) (C-style arrays : row-major order)
  */
-#pragma acc routine seq
 template<typename T>
 void Crout(int d,T*S,T*D){
    for(int k=0;k<d;++k){
@@ -48,7 +47,6 @@ void Crout(int d,T*S,T*D){
  * \param b rhs vector
  * \param x solution of (LU)x=b linear system
  */
-#pragma acc routine seq
 template<typename T>
 void solveCrout(int d,T*LU,T*b,T*x){
    T y[d];
@@ -65,7 +63,7 @@ void solveCrout(int d,T*LU,T*b,T*x){
 }
 
 
-// https://stackoverflow.com/questions/15051367/how-to-compare-vectors-approximately-in-eigen
+/// https://stackoverflow.com/questions/15051367/how-to-compare-vectors-approximately-in-eigen
 template<typename DerivedA, typename DerivedB>
 bool allclose(const Eigen::DenseBase<DerivedA>& a,
               const Eigen::DenseBase<DerivedB>& b,
@@ -86,84 +84,67 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
     std::mt19937 mt(rd());
     std::uniform_real_distribution<T> nums(-1, 1);
     
-    std::chrono::duration<double> eigen_solve(std::chrono::duration<double>::zero());
-    std::chrono::duration<double> crout_host (std::chrono::duration<double>::zero());
-    std::chrono::duration<double> crout_dev  (std::chrono::duration<double>::zero());
+    std::chrono::duration<double> eigen_solve_RowMajor(std::chrono::duration<double>::zero());
+    std::chrono::duration<double> eigen_solve_ColMajor(std::chrono::duration<double>::zero());
+    std::chrono::duration<double> crout_solve(std::chrono::duration<double>::zero());
 
-    for (int mat_size = 1; mat_size < 20; mat_size++) 
+    for (int mat_size = 1; mat_size < 50; mat_size++)
     {
-        Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> A(mat_size, mat_size);
-        Matrix<T, Dynamic, Dynamic> A_ColMajor(mat_size, mat_size);
+        Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> A_RowMajor(mat_size, mat_size);
+        Matrix<T, Dynamic, Dynamic, Eigen::ColMajor> A_ColMajor(mat_size, mat_size); // default in Eigen!
         Matrix<T, Dynamic, 1> b(mat_size);
         
         for (int i = 0; i < 10000; ++i) 
         {
+            // initialization
             for(int i = 0; i <  mat_size; i++) {
                 for(int j = 0; j < mat_size; j++) {
-                    A(i,j) = nums(mt);
-                    A_ColMajor(i,j) = A(i,j);
-                    b(i)   = nums(mt);
+                    A_RowMajor(i,j) = nums(mt);
+                    A_ColMajor(i,j) = A_RowMajor(i,j);
+                    b(i) = nums(mt);
                 }
             }
 
             // Eigen (RowMajor)
-            Matrix<T, Dynamic, 1> eigen_solution(mat_size);
+            Matrix<T, Dynamic, 1> eigen_solution_RowMajor(mat_size);
             auto t1 = std::chrono::high_resolution_clock::now();
-            eigen_solution = A.partialPivLu().solve(b);
+            eigen_solution_RowMajor = A_RowMajor.partialPivLu().solve(b);
             auto t2 = std::chrono::high_resolution_clock::now();
-            eigen_solve += (t2 - t1);
+            eigen_solve_RowMajor += (t2 - t1);
 
             // Eigen (ColMajor)
-            Matrix<T, Dynamic, 1> tmp_solution(mat_size);
-            tmp_solution = A_ColMajor.partialPivLu().solve(b);
-            if (!allclose(eigen_solution, tmp_solution, rtol, atol)) {
-                cout << "Eigen issue with RowMajor vs ColMajor storage order!" << endl << endl;
+            Matrix<T, Dynamic, 1> eigen_solution_ColMajor(mat_size);
+            t1 = std::chrono::high_resolution_clock::now();
+            eigen_solution_ColMajor = A_ColMajor.partialPivLu().solve(b);
+            t2 = std::chrono::high_resolution_clock::now();
+            eigen_solve_ColMajor += (t2 - t1);
+
+            if (!allclose(eigen_solution_RowMajor, eigen_solution_ColMajor, rtol, atol)) {
+                cerr << "Eigen issue with RowMajor vs ColMajor storage order!" << endl << endl;
                 return false;
             }
 
-            // Crout Decomposition CPU
+            // Crout Decomposition
             Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU(mat_size, mat_size);
             Matrix<T, Dynamic, 1> crout_solution(mat_size);
+            
             t1 = std::chrono::high_resolution_clock::now();
-            Crout<T>(mat_size, A.data(), LU.data());
+            Crout<T>(mat_size, A_RowMajor.data(), LU.data());
             solveCrout<T>(mat_size, LU.data(), b.data(), crout_solution.data());
             t2 = std::chrono::high_resolution_clock::now();
-            crout_host += (t2 - t1);
+            crout_solve += (t2 - t1);
 
-            if (!allclose(eigen_solution, crout_solution, rtol, atol)) {
+            if (!allclose(eigen_solution_RowMajor, crout_solution, rtol, atol)) {
                 //cout << eigen_solution.transpose() << endl;
                 //cout << crout_solution.transpose() << endl << endl;
-                return false;
-            }
-
-            // Crout Decomposition GPU
-            Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU_acc(mat_size, mat_size);
-            Matrix<T, Dynamic, 1> crout_solution_dev(mat_size);
-            T *A_dev  = A.data();
-            T *LU_dev = LU_acc.data();
-            T *b_dev  = b.data();
-            T *x_dev  = crout_solution_dev.data();
-
-            t1 = std::chrono::high_resolution_clock::now();
-            #pragma acc kernels copyin(A_dev[0:mat_size*mat_size], LU_dev[0:mat_size*mat_size], b_dev[0:mat_size]) copyout(x_dev[0:mat_size])
-            {
-                Crout<T>(mat_size, A_dev, LU_dev);
-                solveCrout<T>(mat_size, LU_dev, b_dev, x_dev);
-            }
-            t2 = std::chrono::high_resolution_clock::now();
-            crout_dev += (t2 - t1);
-
-            if (!allclose(eigen_solution, crout_solution_dev, rtol, atol)) {
-                //cout << eigen_solution.transpose() << endl;
-                //cout << crout_solution_dev.transpose() << endl << endl;
                 return false;
             }
         }
     }
 
-    cout << "Eigen      : " << eigen_solve.count() << " s" << endl;
-    cout << "Crout host : " << crout_host.count()  << " s" << endl;
-    cout << "Crout dev  : " << crout_dev.count()   << " s" << endl;
+    cout << "Eigen RowMajor : " << eigen_solve_RowMajor.count() << " s" << endl;
+    cout << "Eigen ColMajor : " << eigen_solve_ColMajor.count() << " s" << endl;
+    cout << "Crout          : " << crout_solve.count() << " s" << endl;
 
     return true;
 }
