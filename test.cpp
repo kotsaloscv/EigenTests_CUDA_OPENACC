@@ -96,7 +96,7 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
         Matrix<T, Dynamic, Dynamic, Eigen::ColMajor> A_ColMajor(mat_size, mat_size); // default in Eigen!
         Matrix<T, Dynamic, 1> b(mat_size);
         
-        for (int i = 0; i < 10000; ++i) 
+        for (int i = 0; i < 1000; ++i) 
         {
             // initialization
             for(int i = 0; i <  mat_size; i++) {
@@ -142,7 +142,7 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
 
 #ifdef GPU
             // Crout Decomposition GPU
-            Matrix<T, Dynamic, 1> crout_solution_dev(size);
+            Matrix<T, Dynamic, 1> crout_solution_dev(mat_size);
 
             T *A_dev  = A_RowMajor.data();
             T *LU_dev = LU.data();
@@ -162,9 +162,9 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
         }
     }
 
-    cout << "Eigen RowMajor : " << eigen_solve_RowMajor.count() << " s" << endl;
-    cout << "Eigen ColMajor : " << eigen_solve_ColMajor.count() << " s" << endl;
-    cout << "Crout host     : " << crout_solve_host.count() << " s" << endl;
+    cout << "Eigen RowMajor : " << eigen_solve_RowMajor.count()*1e3 << " ms" << endl;
+    cout << "Eigen ColMajor : " << eigen_solve_ColMajor.count()*1e3 << " ms" << endl;
+    cout << "Crout host     : " << crout_solve_host.count()*1e3 << " ms" << endl;
 
     return true;
 }
