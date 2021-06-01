@@ -1,5 +1,7 @@
 // nvc++ -acc -DEIGEN_DONT_VECTORIZE=1 -I./eigen exp.cpp -o exp
 
+// Legacy code : coreneuron/sim/scopmath/crout_thread.cpp
+
 #include <iostream>
 #include <random>
 
@@ -74,33 +76,33 @@ int main(int argc, char** argv) {
     cout << eigen_solution.transpose() << endl << endl;
 
 
-    // Croot Decomposition CPU
+    // Crout Decomposition CPU
     Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU(size, size);
-    Matrix<T, Dynamic, 1> croot_solution(size);  
+    Matrix<T, Dynamic, 1> crout_solution(size);  
 
     Crout<T>(size, A.data(), LU.data());
-    solveCrout<T>(size, LU.data(), b.data(), croot_solution.data());
+    solveCrout<T>(size, LU.data(), b.data(), crout_solution.data());
 
-    cout << "croot solution CPU" << endl;
-    cout << croot_solution.transpose() << endl << endl;
+    cout << "crout solution CPU" << endl;
+    cout << crout_solution.transpose() << endl << endl;
 
 
-    // Croot Decomposition GPU
+    // Crout Decomposition GPU
     Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU_gpu(size, size);
-    Matrix<T, Dynamic, 1> croot_solution_gpu(size);
+    Matrix<T, Dynamic, 1> crout_solution_gpu(size);
 
     T *A_dev  = A.data();
     T *LU_dev = LU_gpu.data();
     T *b_dev  = b.data();
-    T *x_dev  = croot_solution_gpu.data();
+    T *x_dev  = crout_solution_gpu.data();
 
     #pragma acc kernels copyin(A_dev[0:size*size], LU_dev[0:size*size], b_dev[0:size]) copyout(x_dev[0:size])
     {
        Crout<T>(size, A_dev, LU_dev);
        solveCrout<T>(size, LU_dev, b_dev, x_dev);
     }
-    cout << "croot solution GPU" << endl;
-    cout << croot_solution_gpu.transpose() << endl << endl;
+    cout << "crout solution GPU" << endl;
+    cout << crout_solution_gpu.transpose() << endl << endl;
 
 
     return 0;
