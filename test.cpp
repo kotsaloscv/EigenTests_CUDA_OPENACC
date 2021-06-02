@@ -4,6 +4,7 @@
 #include <random>
 #include <chrono>
 
+#include "Eigen/Dense"
 #include "Eigen/LU"
 
 using namespace Eigen;
@@ -90,13 +91,13 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
     std::chrono::duration<double> eigen_solve_ColMajor(std::chrono::duration<double>::zero());
     std::chrono::duration<double> crout_solve_host(std::chrono::duration<double>::zero());
 
-    for (int mat_size = 2; mat_size < 10; mat_size++)
+    for (int mat_size = 2; mat_size <= 10; mat_size++)
     {
         Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> A_RowMajor(mat_size, mat_size);
         Matrix<T, Dynamic, Dynamic, Eigen::ColMajor> A_ColMajor(mat_size, mat_size); // default in Eigen!
         Matrix<T, Dynamic, 1> b(mat_size);
         
-        for (int i = 0; i < 1000; ++i) 
+        for (int i = 0; i < 100000; ++i) 
         {
             // initialization
             for(int i = 0; i <  mat_size; i++) {
@@ -106,6 +107,10 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
                     b(i) = nums(mt);
                 }
             }
+
+            // Checking Invertibility
+            if (!A_RowMajor.fullPivLu().isInvertible())
+                continue;
 
             // Eigen (RowMajor)
             Matrix<T, Dynamic, 1> eigen_solution_RowMajor(mat_size);
