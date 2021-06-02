@@ -81,7 +81,7 @@ bool allclose(const Eigen::DenseBase<DerivedA>& a,
 
 
 template<typename T>
-bool test_Crout(T rtol = 1e-6, T atol = 1e-6) 
+bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6) 
 {
     std::random_device rd; // seeding
     std::mt19937 mt(rd());
@@ -178,7 +178,7 @@ bool test_Crout(T rtol = 1e-6, T atol = 1e-6)
 int main(int argc, char** argv)
 {
 
-    cout << test_Crout<double>(1e-6, 1e-6) << endl;
+    cout << test_Crout_correctness<double>(1e-6, 1e-6) << endl;
 
     return 0;
 }
