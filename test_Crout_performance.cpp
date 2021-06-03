@@ -11,7 +11,7 @@
 using namespace Eigen;
 using namespace std;
 
-#define DIM 4
+#define DIM 8
 #define LOOPS 50000
 
 /**
@@ -100,14 +100,16 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     {
         MatType A_;
         VecType b_, x_eigen_, x_crout_;
+
         do {
-            for(int i = 0; i <  DIM; i++) {
-                for(int j = 0; j < DIM; j++) {
-                    A_(i,j) = nums(mt);
-                    b_(i) = nums(mt);
+            // initialization
+            for(int r = 0; r <  DIM; r++) {
+                for(int c = 0; c < DIM; c++) {
+                    A_(r,c) = nums(mt);
+                    b_(r) = nums(mt);
                     
-                    x_eigen_(i) = (T)0;
-                    x_crout_(i) = (T)0;
+                    x_eigen_(r) = (T)0;
+                    x_crout_(r) = (T)0;
                 }
             }
         }
@@ -133,7 +135,7 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     cout << "Eigen : " << eigen_solve.count()*1e3 << " ms" << endl;
 
     // Crout
-    #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS]) copy(x_crout[0:LOOPS])
+    #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS]) copyout(x_crout[0:LOOPS])
     for (int i = 0; i < LOOPS; i++)
     {
         Crout<T>(DIM, A[i].data(), A[i].data()); // in-place LU decomposition
