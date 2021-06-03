@@ -11,8 +11,6 @@
 using namespace Eigen;
 using namespace std;
 
-#define DIM 4
-#define LOOPS 50000
 
 /**
  * \brief Crout matrix decomposition : LU Decomposition of (S)ource matrix stored in (D)estination matrix.
@@ -86,45 +84,52 @@ bool allclose(const Eigen::DenseBase<DerivedA>& a,
 template<typename T>
 bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6) 
 {
-    using MatType = Matrix<T, DIM, DIM, Eigen::RowMajor>;
-    using VecType = Matrix<T, DIM, 1>;
+    using MatType = Matrix<T, Dynamic, Dynamic, Eigen::RowMajor>;
+    using VecType = Matrix<T, Dynamic, 1>;
+
+    std::vector<MatType> A;
+    std::vector<VecType> b;
+    std::vector<VecType> x_eigen;
+    std::vector<VecType> x_crout;
 
     std::random_device rd; // seeding
     std::mt19937 mt(rd());
     std::uniform_real_distribution<T> nums(-1, 1);
     
-    MatType A[LOOPS];
-    VecType b[LOOPS], x_eigen[LOOPS], x_crout[LOOPS];
+    for (int mat_size = 2; mat_size < 10; mat_size++)
+    {        
+        for (int i = 0; i < 100000; ++i) 
+        {
+            MatType A_(mat_size, mat_size);
+            VecType b_(mat_size);
+            VecType x_eigen_(mat_size);
+            VecType x_crout_(mat_size);
 
-    for (int i = 0; i < LOOPS; i++)
-    {
-        MatType A_;
-        VecType b_, x_eigen_, x_crout_;
-        do {
-            for(int i = 0; i <  DIM; i++) {
-                for(int j = 0; j < DIM; j++) {
-                    A_(i,j) = nums(mt);
-                    b_(i) = nums(mt);
-                    
-                    x_eigen_(i) = (T)0;
-                    x_crout_(i) = (T)0;
+            do
+            {
+                // initialization
+                for(int r = 0; r <  mat_size; r++) {
+                    for(int c = 0; c < mat_size; c++) {
+                        A_(r,c) = nums(mt);
+                        b_(r) = nums(mt);
+                        x_eigen_(r) = (T)0;
+                        x_crout_(r) = (T)0;
+                    }
                 }
-            }
+            } while (!A_.fullPivLu().isInvertible()); // Checking Invertibility
+
+            A.push_back(A_);
+            b.push_back(b_);
+            x_eigen.push_back(x_eigen_);
+            x_crout.push_back(x_crout_);
         }
-        while (!A_.fullPivLu().isInvertible()); // Checking Invertibility
-
-        A[i] = A_;
-        b[i] = b_;
-
-        x_eigen[i] = x_eigen_;
-        x_crout[i] = x_crout_;
     }
 
     // Eigen CPU
     std::chrono::duration<double> eigen_solve(std::chrono::duration<double>::zero());
     auto t1 = std::chrono::high_resolution_clock::now();
     #pragma omp parallel for
-    for (int i = 0; i < LOOPS; i++)
+    for (int i = 0; i < A.size(); i++)
     {
         x_eigen[i] = A[i].partialPivLu().solve(b[i]);
     }
@@ -133,17 +138,25 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     cout << "Eigen : " << eigen_solve.count()*1e3 << " ms" << endl;
 
     // Crout
-    #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS]) copy(x_crout[0:LOOPS])
-    for (int i = 0; i < LOOPS; i++)
+    std::chrono::duration<double> crout_solve(std::chrono::duration<double>::zero());
+    t1 = std::chrono::high_resolution_clock::now();
+    #pragma omp parallel for
+    for (int i = 0; i < A.size(); i++)
     {
-        Crout<T>(DIM, A[i].data(), A[i].data()); // in-place LU decomposition
-        solveCrout<T>(DIM, A[i].data(), b[i].data(), x_crout[i].data());
+        int mat_size = b[i].size();
+        MatType LU(mat_size, mat_size);
+        Crout<T>(mat_size, A[i].data(), LU.data());
+        solveCrout<T>(mat_size, LU.data(), b[i].data(), x_crout[i].data());
     }
+    t2 = std::chrono::high_resolution_clock::now();
+    crout_solve = (t2 - t1);
+    cout << "Crout : " << crout_solve.count()*1e3 << " ms" << endl;
 
-    // Check Correctness
-    for (int i = 0; i < LOOPS; i++)
-       if (!allclose(x_eigen[i], x_crout[i], rtol, atol))
+    // Check correctness
+    for (int i = 0; i < A.size(); i++) {
+        if (!allclose(x_eigen[i], x_crout[i], rtol, atol))
             return false;
+    }
 
     return true;
 }
