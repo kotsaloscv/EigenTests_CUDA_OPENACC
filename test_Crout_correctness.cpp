@@ -23,7 +23,7 @@ using namespace std;
  */
 #pragma acc routine seq
 template<typename T>
-void Crout(int d,T*S,T*D){
+static inline void Crout(int d,T*S,T*D){
    for(int k=0;k<d;++k){
       for(int i=k;i<d;++i){
          T sum=0.;
@@ -51,7 +51,7 @@ void Crout(int d,T*S,T*D){
  */
 #pragma acc routine seq
 template<typename T>
-void solveCrout(int d,T*LU,T*b,T*x){
+static inline void solveCrout(int d,T*LU,T*b,T*x){
    T y[d];
    for(int i=0;i<d;++i){
       T sum=0.;
@@ -83,6 +83,9 @@ bool allclose(const Eigen::DenseBase<DerivedA>& a,
 template<typename T>
 bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6) 
 {
+    using MatType = Matrix<T, Dynamic, Dynamic, Eigen::RowMajor>;
+    using VecType = Matrix<T, Dynamic, 1>;
+
     std::random_device rd; // seeding
     std::mt19937 mt(rd());
     std::uniform_real_distribution<T> nums(-1, 1);
@@ -91,36 +94,35 @@ bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6)
     std::chrono::duration<double> eigen_solve_ColMajor(std::chrono::duration<double>::zero());
     std::chrono::duration<double> crout_solve_host(std::chrono::duration<double>::zero());
 
-    for (int mat_size = 2; mat_size <= 10; mat_size++)
+    for (int mat_size = 2; mat_size < 10; mat_size++)
     {
-        Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> A_RowMajor(mat_size, mat_size);
+        MatType A_RowMajor(mat_size, mat_size);
         Matrix<T, Dynamic, Dynamic, Eigen::ColMajor> A_ColMajor(mat_size, mat_size); // default in Eigen!
-        Matrix<T, Dynamic, 1> b(mat_size);
+        VecType b(mat_size);
         
-        for (int i = 0; i < 100000; ++i) 
+        for (int repetitions = 0; repetitions < 1000000; ++repetitions)
         {
-            // initialization
-            for(int i = 0; i <  mat_size; i++) {
-                for(int j = 0; j < mat_size; j++) {
-                    A_RowMajor(i,j) = nums(mt);
-                    A_ColMajor(i,j) = A_RowMajor(i,j);
-                    b(i) = nums(mt);
+            do
+            {
+                // initialization
+                for(int r = 0; r < mat_size; r++) {
+                    for(int c = 0; c < mat_size; c++) {
+                        A_RowMajor(r,c) = nums(mt);
+                        A_ColMajor(r,c) = A_RowMajor(r,c);
+                        b(r) = nums(mt);
+                    }
                 }
-            }
-
-            // Checking Invertibility
-            if (!A_RowMajor.fullPivLu().isInvertible())
-                continue;
-
+            } while (!A_RowMajor.fullPivLu().isInvertible()); // Checking Invertibility
+            
             // Eigen (RowMajor)
-            Matrix<T, Dynamic, 1> eigen_solution_RowMajor(mat_size);
+            VecType eigen_solution_RowMajor(mat_size);
             auto t1 = std::chrono::high_resolution_clock::now();
             eigen_solution_RowMajor = A_RowMajor.partialPivLu().solve(b);
             auto t2 = std::chrono::high_resolution_clock::now();
             eigen_solve_RowMajor += (t2 - t1);
 
             // Eigen (ColMajor)
-            Matrix<T, Dynamic, 1> eigen_solution_ColMajor(mat_size);
+            VecType eigen_solution_ColMajor(mat_size);
             t1 = std::chrono::high_resolution_clock::now();
             eigen_solution_ColMajor = A_ColMajor.partialPivLu().solve(b);
             t2 = std::chrono::high_resolution_clock::now();
@@ -131,9 +133,9 @@ bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6)
                 return false;
             }
 
-            // Crout Decomposition CPU
-            Matrix<T, Dynamic, Dynamic, Eigen::RowMajor> LU(mat_size, mat_size);
-            Matrix<T, Dynamic, 1> crout_solution_host(mat_size);
+            // Crout LU-Decomposition CPU
+            MatType LU(mat_size, mat_size);
+            VecType crout_solution_host(mat_size);
             
             t1 = std::chrono::high_resolution_clock::now();
             Crout<T>(mat_size, A_RowMajor.data(), LU.data());
@@ -146,8 +148,8 @@ bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6)
             }
 
 #ifdef GPU
-            // Crout Decomposition GPU
-            Matrix<T, Dynamic, 1> crout_solution_dev(mat_size);
+            // Crout LU-Decomposition GPU
+            VecType crout_solution_dev(mat_size);
 
             T *A_dev  = A_RowMajor.data();
             T *LU_dev = LU.data();
