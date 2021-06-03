@@ -140,7 +140,7 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     // Crout
     std::chrono::duration<double> crout_solve(std::chrono::duration<double>::zero());
     t1 = std::chrono::high_resolution_clock::now();
-    #pragma omp parallel for
+    #pragma acc parallel loop
     for (int i = 0; i < A.size(); i++)
     {
         int mat_size = b[i].size();
