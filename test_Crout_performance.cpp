@@ -1,9 +1,11 @@
 // Legacy code : coreneuron/sim/scopmath/crout_thread.cpp
 
 #include <iostream>
+#include <math.h>
 #include <random>
 #include <chrono>
 #include <vector>
+#include <limits>
 
 #include "Eigen/Dense"
 #include "Eigen/LU"
@@ -14,58 +16,115 @@ using namespace std;
 #define DIM 8
 #define LOOPS 50000
 
+
 /**
- * \brief Crout matrix decomposition : LU Decomposition of (S)ource matrix stored in (D)estination matrix.
- * 
+ * \brief Crout matrix decomposition : in-place LU Decomposition of matrix A.
+ *
  * LU decomposition function.
- * Implementation details : http://www.sci.utah.edu/~wallstedt/LU.htm
- * 
- * \param d matrices of size d x d
- * \param S Source matrix (C-style arrays : row-major order)
- * \param D Destination matrix (LU decomposition of S-matrix) (C-style arrays : row-major order)
+ * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
+ *
+ * \param n The number of rows or columns of the matrix A
+ * \param A matrix of size nxn : in-place LU decomposition (C-style arrays : row-major order)
+ * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
  */
+#ifdef _OPENACC
 #pragma acc routine seq
-template<typename T>
-void Crout(int d,T*S,T*D){
-   for(int k=0;k<d;++k){
-      for(int i=k;i<d;++i){
-         T sum=0.;
-         for(int p=0;p<k;++p)sum+=D[i*d+p]*D[p*d+k];
-         D[i*d+k]=S[i*d+k]-sum;
-      }
-      for(int j=k+1;j<d;++j){
-         T sum=0.;
-         for(int p=0;p<k;++p)sum+=D[k*d+p]*D[p*d+j];
-         D[k*d+j]=(S[k*d+j]-sum)/D[k*d+k];
-      }
-   }
+#endif
+template <typename T>
+EIGEN_DEVICE_FUNC inline void Crout(int n, T* A, int* pivot) {
+    int i, j, k;
+    T *p_k, *p_row, *p_col;
+    T max;
+
+    // For each row and column, k = 0, ..., n-1,
+    for (k = 0, p_k = A; k < n; p_k += n, k++) {
+        // find the pivot row
+        pivot[k] = k;
+        max = fabs(*(p_k + k));
+        for (j = k + 1, p_row = p_k + n; j < n; j++, p_row += n) {
+            if (max < fabs(*(p_row + k))) {
+                max = fabs(*(p_row + k));
+                pivot[k] = j;
+                p_col = p_row;
+            }
+        }
+
+        // and if the pivot row differs from the current row, then
+        // interchange the two rows.
+        if (pivot[k] != k)
+            for (j = 0; j < n; j++) {
+                max = *(p_k + j);
+                *(p_k + j) = *(p_col + j);
+                *(p_col + j) = max;
+            }
+
+        // and if the matrix is singular, return error
+        // if ( *(p_k + k) == 0.0 ) return -1;
+
+        // otherwise find the upper triangular matrix elements for row k.
+        for (j = k + 1; j < n; j++) {
+            *(p_k + j) /= *(p_k + k);
+        }
+
+        // update remaining matrix
+        for (i = k + 1, p_row = p_k + n; i < n; p_row += n, i++)
+            for (j = k + 1; j < n; j++)
+                *(p_row + j) -= *(p_row + k) * *(p_k + j);
+    }
+    //return 0;
 }
 
 /**
- * \brief Crout matrix decomposition : Forward/ Backward substitution.
- * 
- * Forward/ Backward substitution function.
- * Implementation details : http://www.sci.utah.edu/~wallstedt/LU.htm
- * 
- * \param d matrices of size d x d
+ * \brief Crout matrix decomposition : Forward/Backward substitution.
+ *
+ * Forward/Backward substitution function.
+ * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
+ *
+ * \param n The number of rows or columns of the matrix LU
  * \param LU LU-factorized matrix (C-style arrays : row-major order)
- * \param b rhs vector
- * \param x solution of (LU)x=b linear system
+ * \param B rhs vector
+ * \param x solution of (LU)x=B linear system
+ * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
  */
+#ifdef _OPENACC
 #pragma acc routine seq
-template<typename T>
-void solveCrout(int d,T*LU,T*b,T*x){
-   T y[d];
-   for(int i=0;i<d;++i){
-      T sum=0.;
-      for(int k=0;k<i;++k)sum+=LU[i*d+k]*y[k];
-      y[i]=(b[i]-sum)/LU[i*d+i];
-   }
-   for(int i=d-1;i>=0;--i){
-      T sum=0.;
-      for(int k=i+1;k<d;++k)sum+=LU[i*d+k]*x[k];
-      x[i]=(y[i]-sum);
-   }
+#endif
+template <typename T>
+EIGEN_DEVICE_FUNC inline void solveCrout(int n, T* LU, T* B, T* x, int* pivot) {
+    int i, k;
+    T* p_k;
+    T dum;
+
+    // Solve the linear equation Lx = B for x, where L is a lower
+    // triangular matrix.
+    for (k = 0, p_k = LU; k < n; p_k += n, k++) {
+        if (pivot[k] != k) {
+            dum = B[k];
+            B[k] = B[pivot[k]];
+            B[pivot[k]] = dum;
+        }
+        x[k] = B[k];
+        for (i = 0; i < k; i++)
+            x[k] -= x[i] * *(p_k + i);
+        x[k] /= *(p_k + k);
+    }
+
+    // Solve the linear equation Ux = y, where y is the solution
+    // obtained above of Lx = B and U is an upper triangular matrix.
+    // The diagonal part of the upper triangular part of the matrix is
+    // assumed to be 1.0.
+    for (k = n - 1, p_k = LU + n * (n - 1); k >= 0; k--, p_k -= n) {
+        if (pivot[k] != k) {
+            dum = B[k];
+            B[k] = B[pivot[k]];
+            B[pivot[k]] = dum;
+        }
+        for (i = k + 1; i < n; i++)
+            x[k] -= x[i] * *(p_k + i);
+        // if (*(p_k + k) == 0.0) return -1;
+    }
+
+    //return 0;
 }
 
 
@@ -95,6 +154,7 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     
     MatType A[LOOPS];
     VecType b[LOOPS], x_eigen[LOOPS], x_crout[LOOPS];
+    Matrix<int, DIM, 1> pivot[LOOPS];
 
     for (int i = 0; i < LOOPS; i++)
     {
@@ -107,10 +167,9 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
                 for(int c = 0; c < DIM; c++) {
                     A_(r,c) = nums(mt);
                     b_(r) = nums(mt);
-                    
-                    x_eigen_(r) = (T)0;
-                    x_crout_(r) = (T)0;
                 }
+                x_eigen_(r) = (T)0;
+                x_crout_(r) = (T)0;
             }
         }
         while (!A_.fullPivLu().isInvertible()); // Checking Invertibility
@@ -135,11 +194,11 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     cout << "Eigen : " << eigen_solve.count()*1e3 << " ms" << endl;
 
     // Crout
-    #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS]) copyout(x_crout[0:LOOPS])
+    #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS], pivot[0:LOOPS]) copyout(x_crout[0:LOOPS])
     for (int i = 0; i < LOOPS; i++)
     {
-        Crout<T>(DIM, A[i].data(), A[i].data()); // in-place LU decomposition
-        solveCrout<T>(DIM, A[i].data(), b[i].data(), x_crout[i].data());
+        Crout<T>(DIM, A[i].data(), pivot[i].data()); // in-place LU decomposition
+        solveCrout<T>(DIM, A[i].data(), b[i].data(), x_crout[i].data(), pivot[i].data());
     }
 
     // Check Correctness
@@ -154,7 +213,7 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
 int main(int argc, char** argv)
 {
 
-    cout << test_Crout_performance<double>(1e-6, 1e-6) << endl;
+    cout << test_Crout_performance<double>(1e-8, 1e-8) << endl;
 
     return 0;
 }
