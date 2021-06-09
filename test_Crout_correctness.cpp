@@ -1,7 +1,7 @@
 // Legacy code : coreneuron/sim/scopmath/crout_thread.cpp
 
 #include <iostream>
-#include <math.h>
+#include <cmath>
 #include <random>
 #include <chrono>
 #include <limits>
@@ -36,10 +36,10 @@ EIGEN_DEVICE_FUNC inline void Crout(int n, T* A, int* pivot) {
     for (k = 0, p_k = A; k < n; p_k += n, k++) {
         // find the pivot row
         pivot[k] = k;
-        max = fabs(*(p_k + k));
+        max = std::fabs(*(p_k + k));
         for (j = k + 1, p_row = p_k + n; j < n; j++, p_row += n) {
-            if (max < fabs(*(p_row + k))) {
-                max = fabs(*(p_row + k));
+            if (max < std::fabs(*(p_row + k))) {
+                max = std::fabs(*(p_row + k));
                 pivot[k] = j;
                 p_col = p_row;
             }
@@ -247,6 +247,9 @@ bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6)
 
     cout << "Eigen relative error : " << max_relative_error_eigen << endl;
     cout << "Crout relative error : " << max_relative_error_crout << endl;
+
+    cout << "Eigen OoM : " << std::floor(std::log10(max_relative_error_eigen)) << endl;
+    cout << "Crout OoM : " << std::floor(std::log10(max_relative_error_crout)) << endl;
 
     return true;
 }
