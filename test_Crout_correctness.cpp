@@ -13,16 +13,6 @@ using namespace Eigen;
 using namespace std;
 
 
-/**
- * \brief Crout matrix decomposition : in-place LU Decomposition of matrix A.
- *
- * LU decomposition function.
- * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
- *
- * \param n The number of rows or columns of the matrix A
- * \param A matrix of size nxn : in-place LU decomposition (C-style arrays : row-major order)
- * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
- */
 #ifdef _OPENACC
 #pragma acc routine seq
 #endif
@@ -67,21 +57,9 @@ EIGEN_DEVICE_FUNC inline void Crout(int n, T* A, int* pivot) {
             for (j = k + 1; j < n; j++)
                 *(p_row + j) -= *(p_row + k) * *(p_k + j);
     }
-    //return 0;
+    // return 0;
 }
 
-/**
- * \brief Crout matrix decomposition : Forward/Backward substitution.
- *
- * Forward/Backward substitution function.
- * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
- *
- * \param n The number of rows or columns of the matrix LU
- * \param LU LU-factorized matrix (C-style arrays : row-major order)
- * \param B rhs vector
- * \param x solution of (LU)x=B linear system
- * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
- */
 #ifdef _OPENACC
 #pragma acc routine seq
 #endif
@@ -120,7 +98,7 @@ EIGEN_DEVICE_FUNC inline void solveCrout(int n, T* LU, T* B, T* x, int* pivot) {
         // if (*(p_k + k) == 0.0) return -1;
     }
 
-    //return 0;
+    // return 0;
 }
 
 
@@ -170,8 +148,8 @@ bool test_Crout_correctness(T rtol = 1e-6, T atol = 1e-6)
                     for(int c = 0; c < mat_size; c++) {
                         A_RowMajor(r,c) = nums(mt);
                         A_ColMajor(r,c) = A_RowMajor(r,c);
-                        b(r) = nums(mt);
                     }
+                    b(r) = nums(mt);
                 }
             } while (!A_RowMajor.fullPivLu().isInvertible()); // Checking Invertibility
             

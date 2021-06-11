@@ -1,11 +1,10 @@
 // Legacy code : coreneuron/sim/scopmath/crout_thread.cpp
+// nvc++ -acc -DEIGEN_DONT_VECTORIZE=1 -Wc,--pending_instantiations=0 -I./eigen -mp=nonuma -o test_Crout_performance test_Crout_performance.cpp
 
 #include <iostream>
-#include <math.h>
+#include <cmath>
 #include <random>
 #include <chrono>
-#include <vector>
-#include <limits>
 
 #include "Eigen/Dense"
 #include "Eigen/LU"
@@ -13,20 +12,10 @@
 using namespace Eigen;
 using namespace std;
 
-#define DIM 8
+#define DIM 10
 #define LOOPS 50000
 
 
-/**
- * \brief Crout matrix decomposition : in-place LU Decomposition of matrix A.
- *
- * LU decomposition function.
- * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
- *
- * \param n The number of rows or columns of the matrix A
- * \param A matrix of size nxn : in-place LU decomposition (C-style arrays : row-major order)
- * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
- */
 #ifdef _OPENACC
 #pragma acc routine seq
 #endif
@@ -40,10 +29,10 @@ EIGEN_DEVICE_FUNC inline void Crout(int n, T* A, int* pivot) {
     for (k = 0, p_k = A; k < n; p_k += n, k++) {
         // find the pivot row
         pivot[k] = k;
-        max = fabs(*(p_k + k));
+        max = std::fabs(*(p_k + k));
         for (j = k + 1, p_row = p_k + n; j < n; j++, p_row += n) {
-            if (max < fabs(*(p_row + k))) {
-                max = fabs(*(p_row + k));
+            if (max < std::fabs(*(p_row + k))) {
+                max = std::fabs(*(p_row + k));
                 pivot[k] = j;
                 p_col = p_row;
             }
@@ -71,21 +60,9 @@ EIGEN_DEVICE_FUNC inline void Crout(int n, T* A, int* pivot) {
             for (j = k + 1; j < n; j++)
                 *(p_row + j) -= *(p_row + k) * *(p_k + j);
     }
-    //return 0;
+    // return 0;
 }
 
-/**
- * \brief Crout matrix decomposition : Forward/Backward substitution.
- *
- * Forward/Backward substitution function.
- * Implementation details : http://www.mymathlib.com/c_source/matrices/linearsystems/crout_pivot.c
- *
- * \param n The number of rows or columns of the matrix LU
- * \param LU LU-factorized matrix (C-style arrays : row-major order)
- * \param B rhs vector
- * \param x solution of (LU)x=B linear system
- * \param pivot matrix of size n : The i-th element is the pivot row interchanged with row i
- */
 #ifdef _OPENACC
 #pragma acc routine seq
 #endif
@@ -124,7 +101,7 @@ EIGEN_DEVICE_FUNC inline void solveCrout(int n, T* LU, T* B, T* x, int* pivot) {
         // if (*(p_k + k) == 0.0) return -1;
     }
 
-    //return 0;
+    // return 0;
 }
 
 
@@ -143,9 +120,9 @@ bool allclose(const Eigen::DenseBase<DerivedA>& a,
 
 
 template<typename T>
-bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6) 
+bool test_Crout_performance(T rtol = 1e-8, T atol = 1e-8)
 {
-    using MatType = Matrix<T, DIM, DIM, Eigen::RowMajor>;
+    using MatType = Matrix<T, DIM, DIM, Eigen::ColMajor>;
     using VecType = Matrix<T, DIM, 1>;
 
     std::random_device rd; // seeding
@@ -166,19 +143,14 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
             for(int r = 0; r <  DIM; r++) {
                 for(int c = 0; c < DIM; c++) {
                     A_(r,c) = nums(mt);
-                    b_(r) = nums(mt);
                 }
-                x_eigen_(r) = (T)0;
-                x_crout_(r) = (T)0;
+                b_(r) = nums(mt);
             }
         }
         while (!A_.fullPivLu().isInvertible()); // Checking Invertibility
 
         A[i] = A_;
         b[i] = b_;
-
-        x_eigen[i] = x_eigen_;
-        x_crout[i] = x_crout_;
     }
 
     // Eigen CPU
@@ -197,6 +169,7 @@ bool test_Crout_performance(T rtol = 1e-6, T atol = 1e-6)
     #pragma acc parallel loop copyin(A[0:LOOPS], b[0:LOOPS], pivot[0:LOOPS]) copyout(x_crout[0:LOOPS])
     for (int i = 0; i < LOOPS; i++)
     {
+        if (!A[i].IsRowMajor) A[i].transposeInPlace();
         Crout<T>(DIM, A[i].data(), pivot[i].data()); // in-place LU decomposition
         solveCrout<T>(DIM, A[i].data(), b[i].data(), x_crout[i].data(), pivot[i].data());
     }
